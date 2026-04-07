@@ -81,11 +81,15 @@ class MenuBarController: NSObject {
         statusItem.menu = menu
     }
 
-    func updateStatus(model: ModelSize, ready: Bool) {
+    func updateStatus(model: ModelSize, ready: Bool, message: String? = nil) {
         let modelName = model.rawValue
             .replacingOccurrences(of: "ggml-", with: "")
             .replacingOccurrences(of: ".bin", with: "")
-        statusMenuItem.title = "Model: \(modelName) | \(ready ? "Ready" : "Loading...")"
+        if let message = message {
+            statusMenuItem.title = message
+        } else {
+            statusMenuItem.title = "Model: \(modelName) | \(ready ? "Ready" : "Loading...")"
+        }
 
         for (size, item) in modelMenuItems {
             item.state = size == model ? .on : .off

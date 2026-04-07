@@ -94,6 +94,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, MenuBarDelegate {
 
         if !HotkeyManager.checkAccessibility(prompt: true) {
             print("Accessibility permission required — waiting for user to grant it...")
+            menuBar.updateStatus(
+                model: modelManager.currentModelSize(),
+                ready: false,
+                message: "Grant Accessibility → restart app"
+            )
             // Poll every 2 seconds until permission is granted
             accessibilityTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) {
                 [weak self] timer in
