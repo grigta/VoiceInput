@@ -22,11 +22,12 @@ if command -v create-dmg &>/dev/null; then
     create-dmg \
         --volname "${APP_NAME}" \
         --volicon "Resources/VoiceInput.icns" \
+        --background "Resources/dmg-background.png" \
         --window-pos 200 120 \
         --window-size 660 400 \
-        --icon-size 120 \
-        --icon "${APP_NAME}.app" 180 190 \
-        --app-drop-link 480 190 \
+        --icon-size 160 \
+        --icon "${APP_NAME}.app" 170 190 \
+        --app-drop-link 490 190 \
         --hide-extension "${APP_NAME}.app" \
         --no-internet-enable \
         "${DMG_PATH}" \
