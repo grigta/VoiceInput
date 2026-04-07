@@ -10,6 +10,8 @@
     <string>VoiceInput</string>
     <key>CFBundleExecutable</key>
     <string>VoiceInput</string>
+    <key>CFBundleIconFile</key>
+    <string>VoiceInput</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleVersion</key>

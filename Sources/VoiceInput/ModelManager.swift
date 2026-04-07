@@ -22,7 +22,7 @@ enum ModelSize: String, CaseIterable, Identifiable {
     }
 }
 
-class ModelManager: NSObject, ObservableObject, URLSessionDownloadDelegate {
+class ModelManager: NSObject, URLSessionDownloadDelegate {
     static let modelsDirectory: URL = {
         let appSupport = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask
@@ -30,12 +30,10 @@ class ModelManager: NSObject, ObservableObject, URLSessionDownloadDelegate {
         return appSupport.appendingPathComponent("VoiceInput/models", isDirectory: true)
     }()
 
-    @Published var downloadProgress: Double = 0
-    @Published var isDownloading = false
-    @Published var downloadError: String?
-
+    var onProgress: ((Double) -> Void)?
     private var downloadCompletion: ((Result<URL, Error>) -> Void)?
     private var currentDownloadDestination: URL?
+    private var isDownloading = false
 
     func modelPath(for size: ModelSize) -> URL {
         Self.modelsDirectory.appendingPathComponent(size.rawValue)
@@ -58,7 +56,11 @@ class ModelManager: NSObject, ObservableObject, URLSessionDownloadDelegate {
         UserDefaults.standard.set(size.rawValue, forKey: "selectedModel")
     }
 
-    func downloadModel(_ size: ModelSize, completion: @escaping (Result<URL, Error>) -> Void) {
+    func downloadModel(
+        _ size: ModelSize,
+        progress: @escaping (Double) -> Void,
+        completion: @escaping (Result<URL, Error>) -> Void
+    ) {
         guard !isDownloading else { return }
 
         do {
@@ -72,8 +74,7 @@ class ModelManager: NSObject, ObservableObject, URLSessionDownloadDelegate {
         }
 
         isDownloading = true
-        downloadProgress = 0
-        downloadError = nil
+        onProgress = progress
         downloadCompletion = completion
         currentDownloadDestination = modelPath(for: size)
 
@@ -100,11 +101,10 @@ class ModelManager: NSObject, ObservableObject, URLSessionDownloadDelegate {
             }
             try FileManager.default.moveItem(at: location, to: dest)
             isDownloading = false
-            downloadProgress = 1.0
+            onProgress?(1.0)
             downloadCompletion?(.success(dest))
         } catch {
             isDownloading = false
-            downloadError = error.localizedDescription
             downloadCompletion?(.failure(error))
         }
     }
@@ -117,7 +117,8 @@ class ModelManager: NSObject, ObservableObject, URLSessionDownloadDelegate {
         totalBytesExpectedToWrite: Int64
     ) {
         if totalBytesExpectedToWrite > 0 {
-            downloadProgress = Double(totalBytesWritten) / Double(totalBytesExpectedToWrite)
+            let progress = Double(totalBytesWritten) / Double(totalBytesExpectedToWrite)
+            onProgress?(progress)
         }
     }
 
@@ -128,7 +129,6 @@ class ModelManager: NSObject, ObservableObject, URLSessionDownloadDelegate {
     ) {
         if let error = error {
             isDownloading = false
-            downloadError = error.localizedDescription
             downloadCompletion?(.failure(error))
         }
     }

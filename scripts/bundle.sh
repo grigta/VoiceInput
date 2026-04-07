@@ -19,6 +19,11 @@ cp "${BUILD_DIR}/${APP_NAME}" "${BUNDLE_DIR}/Contents/MacOS/"
 # Copy Info.plist
 cp Resources/Info.plist "${BUNDLE_DIR}/Contents/"
 
+# Copy app icon
+if [ -f Resources/VoiceInput.icns ]; then
+    cp Resources/VoiceInput.icns "${BUNDLE_DIR}/Contents/Resources/"
+fi
+
 # Copy Metal shader bundles (whisper.cpp builds these as SPM resources)
 find "${BUILD_DIR}" -name "*.bundle" -maxdepth 2 | while read -r bundle; do
     echo "Copying resource bundle: ${bundle}"

@@ -10,7 +10,6 @@ class FirstLaunchWindow: NSObject {
 
     private var modelManager: ModelManager?
     private var completion: ((ModelSize) -> Void)?
-    private var progressObserver: NSKeyValueObservation?
 
     func show(modelManager: ModelManager, completion: @escaping (ModelSize) -> Void) {
         self.modelManager = modelManager
@@ -112,33 +111,28 @@ class FirstLaunchWindow: NSObject {
         progressIndicator.isHidden = false
         statusLabel.stringValue = "Downloading \(selectedSize.displayName)..."
 
-        // Observe progress
-        progressObserver = modelManager.observe(\.downloadProgress, options: [.new]) {
-            [weak self] _, change in
-            DispatchQueue.main.async {
-                if let progress = change.newValue {
-                    self?.progressIndicator.doubleValue = progress
-                    let percent = Int(progress * 100)
-                    self?.statusLabel.stringValue = "Downloading... \(percent)%"
+        modelManager.downloadModel(
+            selectedSize,
+            progress: { [weak self] progress in
+                self?.progressIndicator.doubleValue = progress
+                let percent = Int(progress * 100)
+                self?.statusLabel.stringValue = "Downloading... \(percent)%"
+            },
+            completion: { [weak self] result in
+                guard let self = self else { return }
+
+                switch result {
+                case .success:
+                    self.modelManager?.setCurrentModel(self.selectedSize)
+                    self.window.close()
+                    self.completion?(self.selectedSize)
+                case .failure(let error):
+                    self.statusLabel.stringValue = "Error: \(error.localizedDescription)"
+                    self.downloadButton.isEnabled = true
+                    self.radioButtons.values.forEach { $0.isEnabled = true }
                 }
             }
-        }
-
-        modelManager.downloadModel(selectedSize) { [weak self] result in
-            guard let self = self else { return }
-            self.progressObserver?.invalidate()
-
-            switch result {
-            case .success:
-                self.modelManager?.setCurrentModel(self.selectedSize)
-                self.window.close()
-                self.completion?(self.selectedSize)
-            case .failure(let error):
-                self.statusLabel.stringValue = "Error: \(error.localizedDescription)"
-                self.downloadButton.isEnabled = true
-                self.radioButtons.values.forEach { $0.isEnabled = true }
-            }
-        }
+        )
     }
 
     private func makeLabel(_ text: String, font: NSFont, frame: NSRect) -> NSTextField {

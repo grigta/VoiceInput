@@ -165,15 +165,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, MenuBarDelegate {
             loadModelAndStart()
         } else {
             menuBar.updateStatus(model: size, ready: false)
-            modelManager.downloadModel(size) { [weak self] result in
-                switch result {
-                case .success:
-                    self?.modelManager.setCurrentModel(size)
-                    self?.loadModelAndStart()
-                case .failure(let error):
-                    print("Download failed: \(error)")
+            modelManager.downloadModel(
+                size,
+                progress: { _ in },
+                completion: { [weak self] result in
+                    switch result {
+                    case .success:
+                        self?.modelManager.setCurrentModel(size)
+                        self?.loadModelAndStart()
+                    case .failure(let error):
+                        print("Download failed: \(error)")
+                    }
                 }
-            }
+            )
         }
     }
 
