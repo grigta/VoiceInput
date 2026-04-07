@@ -223,17 +223,23 @@ class AppDelegate: NSObject, NSApplicationDelegate, MenuBarDelegate {
             whisperContext = nil
             loadModelAndStart()
         } else {
-            menuBar.updateStatus(model: size, ready: false)
+            menuBar.updateStatus(model: size, ready: false, message: "Downloading \(size.displayName)...")
+            print("[App] Downloading model: \(size.displayName)")
             modelManager.downloadModel(
                 size,
-                progress: { _ in },
+                progress: { [weak self] progress in
+                    let pct = Int(progress * 100)
+                    self?.menuBar.updateStatus(model: size, ready: false, message: "Downloading... \(pct)%")
+                },
                 completion: { [weak self] result in
                     switch result {
                     case .success:
+                        print("[App] Download complete: \(size.displayName)")
                         self?.modelManager.setCurrentModel(size)
                         self?.loadModelAndStart()
                     case .failure(let error):
-                        print("Download failed: \(error)")
+                        self?.menuBar.updateStatus(model: size, ready: false, message: "Download failed")
+                        print("[App] Download failed: \(error)")
                     }
                 }
             )
