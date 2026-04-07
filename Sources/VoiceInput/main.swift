@@ -73,7 +73,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, MenuBarDelegate {
                 let ctx = try WhisperContext.create(modelPath: path)
                 await MainActor.run {
                     self?.whisperContext = ctx
-                    self?.menuBar.updateStatus(model: size, ready: true)
+                    print("[App] Model loaded: \(size.rawValue)")
                     self?.startHotkeyListener()
                 }
             } catch {
@@ -87,38 +87,58 @@ class AppDelegate: NSObject, NSApplicationDelegate, MenuBarDelegate {
 
     // MARK: - Hotkey
 
+    private var hasPromptedAccessibility = false
+
     private func startHotkeyListener() {
         // Stop any existing retry timer
         accessibilityTimer?.invalidate()
         accessibilityTimer = nil
 
-        if !HotkeyManager.checkAccessibility(prompt: true) {
-            print("Accessibility permission required — waiting for user to grant it...")
+        // Check accessibility — only show prompt once per launch
+        let isTrusted = HotkeyManager.checkAccessibility(prompt: !hasPromptedAccessibility)
+        hasPromptedAccessibility = true
+
+        if !isTrusted {
+            print("[App] Accessibility not granted — polling every 2s...")
             menuBar.updateStatus(
                 model: modelManager.currentModelSize(),
                 ready: false,
-                message: "Grant Accessibility → restart app"
+                message: "Waiting for Accessibility permission..."
             )
-            // Poll every 2 seconds until permission is granted
             accessibilityTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) {
                 [weak self] timer in
                 if HotkeyManager.checkAccessibility(prompt: false) {
                     timer.invalidate()
                     self?.accessibilityTimer = nil
-                    print("Accessibility permission granted!")
+                    print("[App] Accessibility granted!")
                     self?.startHotkeyListener()
                 }
             }
             return
         }
 
-        hotkeyManager.start { [weak self] isKeyDown in
-            DispatchQueue.main.async {
-                if isKeyDown {
-                    self?.startRecording()
-                } else {
-                    self?.stopRecordingAndTranscribe()
-                }
+        // Try to create the event tap
+        let success = hotkeyManager.start { [weak self] isKeyDown in
+            if isKeyDown {
+                self?.startRecording()
+            } else {
+                self?.stopRecordingAndTranscribe()
+            }
+        }
+
+        if success {
+            print("[App] Hotkey listener started — press Option+D to record")
+            menuBar.updateStatus(model: modelManager.currentModelSize(), ready: true)
+        } else {
+            print("[App] Failed to create event tap — retrying in 3s...")
+            menuBar.updateStatus(
+                model: modelManager.currentModelSize(),
+                ready: false,
+                message: "Hotkey failed — try restarting app"
+            )
+            // Retry once after delay (macOS sometimes needs time after granting permission)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+                self?.startHotkeyListener()
             }
         }
     }

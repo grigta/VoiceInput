@@ -126,39 +126,79 @@ class MenuBarController: NSObject {
 
     // MARK: - Shortcut Recording
 
+    private var recorderPanel: NSPanel?
+    private var globalMonitor: Any?
+    private var localMonitor: Any?
+
     @objc private func startRecordingShortcut() {
-        shortcutMenuItem.title = "Press new shortcut..."
-        isRecordingShortcut = true
+        // Open a small floating panel so we can capture key events
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 300, height: 80),
+            styleMask: [.titled, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.title = "Press new shortcut..."
+        panel.level = .floating
+        panel.center()
+        panel.isReleasedWhenClosed = false
 
-        shortcutMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
-            guard let self = self, self.isRecordingShortcut else { return event }
+        let label = NSTextField(frame: NSRect(x: 20, y: 25, width: 260, height: 30))
+        label.stringValue = "Press a key combination (e.g. ⌥D)..."
+        label.isBezeled = false
+        label.isEditable = false
+        label.drawsBackground = false
+        label.alignment = .center
+        label.font = .systemFont(ofSize: 14)
+        panel.contentView?.addSubview(label)
 
-            let modifiers = event.cgEvent?.flags ?? []
-            let keyCode = CGKeyCode(event.keyCode)
+        panel.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        recorderPanel = panel
 
-            // Require at least one modifier
-            let hasModifier = modifiers.contains(.maskCommand) ||
-                modifiers.contains(.maskAlternate) ||
-                modifiers.contains(.maskControl) ||
-                modifiers.contains(.maskShift)
+        shortcutMenuItem.title = "Recording..."
 
-            guard hasModifier else { return nil }
-
-            self.isRecordingShortcut = false
-            if let monitor = self.shortcutMonitor {
-                NSEvent.removeMonitor(monitor)
-                self.shortcutMonitor = nil
-            }
-
-            self.currentModifiers = modifiers.intersection(
-                [.maskCommand, .maskAlternate, .maskControl, .maskShift]
-            )
-            self.currentKeyCode = keyCode
-            self.shortcutMenuItem.title = self.shortcutDisplayString()
-            self.delegate?.menuBarDidRecordShortcut(modifiers: self.currentModifiers, keyCode: keyCode)
-
+        // Use BOTH local (for events in this panel) and global (for events elsewhere) monitors
+        localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
+            self?.handleRecordedEvent(event)
             return nil
         }
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
+            self?.handleRecordedEvent(event)
+        }
+    }
+
+    private func handleRecordedEvent(_ event: NSEvent) {
+        let modifiers = event.modifierFlags
+        let keyCode = CGKeyCode(event.keyCode)
+
+        // Require at least one modifier
+        let hasModifier = modifiers.contains(.command) ||
+            modifiers.contains(.option) ||
+            modifiers.contains(.control) ||
+            modifiers.contains(.shift)
+
+        guard hasModifier else { return }
+
+        // Clean up monitors and panel
+        if let monitor = localMonitor { NSEvent.removeMonitor(monitor) }
+        if let monitor = globalMonitor { NSEvent.removeMonitor(monitor) }
+        localMonitor = nil
+        globalMonitor = nil
+        recorderPanel?.close()
+        recorderPanel = nil
+
+        // Convert NSEvent modifier flags to CGEventFlags
+        var cgFlags: CGEventFlags = []
+        if modifiers.contains(.command) { cgFlags.insert(.maskCommand) }
+        if modifiers.contains(.option) { cgFlags.insert(.maskAlternate) }
+        if modifiers.contains(.control) { cgFlags.insert(.maskControl) }
+        if modifiers.contains(.shift) { cgFlags.insert(.maskShift) }
+
+        currentModifiers = cgFlags
+        currentKeyCode = keyCode
+        shortcutMenuItem.title = shortcutDisplayString()
+        delegate?.menuBarDidRecordShortcut(modifiers: cgFlags, keyCode: keyCode)
     }
 
     @objc private func selectModel(_ sender: NSMenuItem) {
