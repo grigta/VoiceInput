@@ -146,16 +146,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, MenuBarDelegate {
     // MARK: - Push-to-Talk Cycle
 
     private func startRecording() {
-        guard whisperContext != nil, !isRecording else { return }
+        guard whisperContext != nil, !isRecording else {
+            print("[App] startRecording skipped: context=\(whisperContext != nil) isRecording=\(isRecording)")
+            return
+        }
 
         do {
             try audioRecorder.startRecording()
             isRecording = true
             overlay.showRecording()
             menuBar.updateIcon(recording: true, micDenied: false)
+            print("[App] Recording started")
         } catch {
             menuBar.updateIcon(recording: false, micDenied: true)
-            print("Failed to start recording: \(error)")
+            print("[App] Failed to start recording: \(error)")
         }
     }
 
@@ -166,7 +170,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, MenuBarDelegate {
         isRecording = false
         menuBar.updateIcon(recording: false, micDenied: false)
 
+        print("[App] Recording stopped. Samples: \(samples.count) (\(String(format: "%.1f", Double(samples.count) / 16000.0))s)")
+
         guard !samples.isEmpty, let ctx = whisperContext else {
+            print("[App] No samples or no context — skipping transcription")
+            overlay.hide()
+            return
+        }
+
+        // Need at least 0.5s of audio
+        guard samples.count > 8000 else {
+            print("[App] Audio too short (\(samples.count) samples) — skipping")
             overlay.hide()
             return
         }
@@ -175,17 +189,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, MenuBarDelegate {
 
         Task {
             do {
+                print("[App] Transcribing \(samples.count) samples...")
                 let text = try await ctx.transcribe(samples)
+                print("[App] Transcription result: '\(text)'")
                 await MainActor.run {
                     if !text.isEmpty {
+                        print("[App] Injecting text: '\(text)'")
                         self.textInjector.inject(text)
+                    } else {
+                        print("[App] Transcription returned empty string")
                     }
                     self.overlay.hide()
                 }
             } catch {
                 await MainActor.run {
                     self.overlay.hide()
-                    print("Transcription failed: \(error)")
+                    print("[App] Transcription error: \(error)")
                 }
             }
         }

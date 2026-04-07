@@ -27,11 +27,14 @@ actor WhisperContext {
     }
 
     static func create(modelPath: String) throws -> WhisperContext {
+        print("[Whisper] Loading model: \(modelPath)")
         var params = whisper_context_default_params()
-        params.flash_attn = true
+        // Don't enable flash_attn — requires Metal shader resources in specific path
+        params.flash_attn = false
         guard let ctx = whisper_init_from_file_with_params(modelPath, params) else {
             throw WhisperError.couldNotInitializeContext
         }
+        print("[Whisper] Model loaded successfully")
         return WhisperContext(context: ctx)
     }
 
@@ -50,20 +53,32 @@ actor WhisperContext {
         params.single_segment = false
         params.suppress_non_speech_tokens = true
 
+        print("[Whisper] Running inference on \(samples.count) samples with \(maxThreads) threads...")
+        let startTime = CFAbsoluteTimeGetCurrent()
+
         let result = samples.withUnsafeBufferPointer { buf in
             whisper_full(context, params, buf.baseAddress, Int32(buf.count))
         }
+
+        let elapsed = CFAbsoluteTimeGetCurrent() - startTime
+        print("[Whisper] Inference completed in \(String(format: "%.2f", elapsed))s, result code: \(result)")
+
         guard result == 0 else {
             throw WhisperError.transcriptionFailed(result)
         }
 
         let segmentCount = whisper_full_n_segments(context)
+        print("[Whisper] Segments: \(segmentCount)")
         var text = ""
         for i in 0..<segmentCount {
             if let segText = whisper_full_get_segment_text(context, i) {
-                text += String(cString: segText)
+                let segment = String(cString: segText)
+                print("[Whisper] Segment \(i): '\(segment)'")
+                text += segment
             }
         }
-        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        print("[Whisper] Final text: '\(trimmed)'")
+        return trimmed
     }
 }

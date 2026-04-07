@@ -9,32 +9,43 @@ class TextInjector {
         // Save current clipboard contents
         let savedItems = savePasteboard(pasteboard)
 
-        // Set our text
+        // Set our text to clipboard
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
 
-        // Simulate Cmd+V
-        simulatePaste()
+        print("[TextInjector] Set clipboard to: '\(text)'")
 
-        // Restore clipboard after paste completes
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            self.restorePasteboard(pasteboard, items: savedItems)
+        // Small delay to ensure clipboard is ready, then paste
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            self.simulatePaste()
+
+            // Restore clipboard after paste completes
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                self.restorePasteboard(pasteboard, items: savedItems)
+            }
         }
     }
 
     private func simulatePaste() {
-        let source = CGEventSource(stateID: .combinedSessionState)
-        let vKeyCode: CGKeyCode = 0x09
+        let vKeyCode: CGKeyCode = 0x09  // V key
+
+        // Try creating event source — can return nil, that's ok
+        let source = CGEventSource(stateID: .hidSystemState)
 
         guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: vKeyCode, keyDown: true),
               let keyUp = CGEvent(keyboardEventSource: source, virtualKey: vKeyCode, keyDown: false)
-        else { return }
+        else {
+            print("[TextInjector] ERROR: Failed to create CGEvent for paste")
+            return
+        }
 
         keyDown.flags = .maskCommand
         keyUp.flags = .maskCommand
 
-        keyDown.post(tap: .cgAnnotatedSessionEventTap)
-        keyUp.post(tap: .cgAnnotatedSessionEventTap)
+        keyDown.post(tap: .cghidEventTap)
+        keyUp.post(tap: .cghidEventTap)
+
+        print("[TextInjector] Simulated Cmd+V")
     }
 
     private func savePasteboard(_ pasteboard: NSPasteboard) -> [[String: Data]] {
