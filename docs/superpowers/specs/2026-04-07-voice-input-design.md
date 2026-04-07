@@ -1,172 +1,252 @@
-# VoiceInput — macOS Speech-to-Text App Design
+# VoiceInput — Design Specification
 
-## Overview
+**Date:** 2026-04-07
+**Status:** Approved
 
-Native Swift macOS menu bar application for speech-to-text input. Converts voice to text and pastes it at the current cursor position in any application. Uses sherpa-onnx (k2-fsa) with Silero VAD + Whisper for offline recognition on Apple Silicon.
+Lightweight open-source push-to-talk voice input app for macOS Apple Silicon. Transcribes speech to text using whisper.cpp and inserts it at the cursor position. Supports English and Russian with automatic language detection.
 
-## Requirements
-
-- **Language**: Russian with English word sprinkles
-- **Activation**: Push-to-talk on Right Shift (hold to record, release to recognize and paste)
-- **Platform**: Swift macOS app, menu bar only (no Dock icon)
-- **Recognition engine**: sherpa-onnx — Silero VAD + Whisper offline
-- **Text insertion**: Clipboard-based (save → paste via Cmd+V → restore)
-- **Visual feedback**: Menu bar icon + floating animated circle at bottom-center
-- **Auto-start**: Login item
-- **Model selection**: Start with Whisper small, user can switch to medium/large-v3 in settings
+---
 
 ## Architecture
 
-Single-process Swift macOS application.
+### Approach
+
+whisper.cpp as a git submodule, compiled together with the app via SPM C-target. Swift calls whisper.cpp through a C bridging header. Single binary, no external runtime dependencies.
+
+### Project Structure
 
 ```
-┌─────────────────────────────────────────────┐
-│              VoiceInputApp                   │
-│                                              │
-│  ┌──────────────┐   ┌────────────────────┐  │
-│  │ HotkeyManager│   │  AudioCaptureEngine│  │
-│  │ (CGEvent tap)│──▶│  (AVAudioEngine)   │  │
-│  └──────────────┘   └────────┬───────────┘  │
-│                              │ float32 PCM   │
-│                              ▼               │
-│                     ┌────────────────────┐   │
-│                     │   SherpaRecognizer │   │
-│                     │  VAD (Silero) +    │   │
-│                     │  Whisper (offline)  │   │
-│                     └────────┬───────────┘   │
-│                              │ text          │
-│                              ▼               │
-│                     ┌────────────────────┐   │
-│                     │ ClipboardInserter  │   │
-│                     │ save → paste →     │   │
-│                     │ restore            │   │
-│                     └────────────────────┘   │
-│                                              │
-│  ┌──────────────┐   ┌────────────────────┐  │
-│  │ MenuBarView  │   │ OverlayWindow      │  │
-│  │ (status icon)│   │ (animated circle)  │  │
-│  └──────────────┘   └────────────────────┘  │
-└─────────────────────────────────────────────┘
+VoiceInput/
+├── Package.swift              # SPM manifest, C-target for whisper.cpp
+├── Sources/
+│   ├── VoiceInput/            # main Swift app code
+│   │   ├── App.swift          # @main, NSApplication, menubar setup
+│   │   ├── AudioRecorder.swift    # AVAudioEngine, microphone capture
+│   │   ├── WhisperWrapper.swift   # Swift wrapper over whisper.cpp C API
+│   │   ├── HotkeyManager.swift    # global hotkey (CGEvent tap)
+│   │   ├── TextInjector.swift     # text insertion at cursor (CGEvent)
+│   │   ├── ModelManager.swift     # model download/storage
+│   │   ├── OverlayWindow.swift    # floating recording indicator
+│   │   └── MenuBarController.swift # NSStatusItem, settings menu
+│   └── CWhisper/             # C-target, bridging for whisper.cpp
+│       ├── include/
+│       │   └── whisper_bridge.h
+│       └── whisper_bridge.c
+├── vendor/
+│   └── whisper.cpp/           # git submodule
+├── Resources/
+│   └── Info.plist
+└── .github/
+    └── workflows/
+        └── build.yml          # CI: build + Release
 ```
 
-### Components
+### Module Responsibilities
 
-- **HotkeyManager** — Global Right Shift intercept via `CGEvent` tap. Tracks `.flagsChanged` events, keyCode 60 for right shift.
-- **AudioCaptureEngine** — Microphone recording via `AVAudioEngine`, converts to 16kHz mono float32. Buffer size: 512 samples (~32ms).
-- **SherpaRecognizer** — Wrapper over sherpa-onnx C API. Runs Silero VAD during recording to segment speech. Runs Whisper offline on accumulated segments after key release.
-- **ClipboardInserter** — Saves `NSPasteboard.general` contents, writes recognized text, simulates Cmd+V via `CGEvent`, restores original clipboard after ~100ms.
-- **MenuBarView** — SwiftUI `MenuBarExtra` with status icon and dropdown settings.
-- **OverlayWindow** — Floating `NSWindow` with animated circle visualizing voice amplitude.
+| Module | Responsibility |
+|--------|---------------|
+| `App.swift` | App lifecycle, NSApplication setup, menubar initialization |
+| `AudioRecorder.swift` | AVAudioEngine capture, PCM Float32 16kHz mono buffer |
+| `WhisperWrapper.swift` | Load model, call whisper_full(), return transcribed text |
+| `HotkeyManager.swift` | CGEvent tap for global configurable hotkey |
+| `TextInjector.swift` | Simulate keyboard events to type text at cursor |
+| `ModelManager.swift` | Download models from HuggingFace, SHA256 verify, storage |
+| `OverlayWindow.swift` | Floating NSPanel indicator (recording/processing states) |
+| `MenuBarController.swift` | NSStatusItem, dropdown menu, settings |
+| `CWhisper` | C bridging layer for whisper.cpp |
 
-## Push-to-Talk Lifecycle
+---
+
+## Data Flow (Push-to-Talk Cycle)
 
 ```
-Right Shift Down                              Right Shift Up
-     │                                              │
-     ▼                                              ▼
- ┌─ Show overlay                               ┌─ Hide overlay
- ├─ Menu bar → red icon                        ├─ Menu bar → normal icon
- ├─ Start AVAudioEngine recording              ├─ Stop recording
- ├─ Start VAD (Silero)                         ├─ Flush VAD (remaining audio)
- │                                             ├─ Whisper recognizes all segments
- │  While holding:                             ├─ Text → clipboard → Cmd+V
- │  ├─ Audio → VAD (segments speech)           ├─ Restore clipboard
- │  ├─ VAD accumulates speech segments         └─ Done
- │  └─ RMS amplitude → circle animation
+User holds hotkey (default: Option+D)
+        │
+        ▼
+  HotkeyManager (CGEvent tap)
+        │ keyDown event
+        ▼
+  AudioRecorder.startRecording()
+        │ AVAudioEngine → PCM Float32, 16kHz mono
+        │ buffer accumulates in memory (Array<Float>)
+        ▼
+  OverlayWindow.show()  ← red pulsing circle
+        │
+  ══════ user speaks... ══════
+        │
+User releases hotkey
+        │
+        ▼
+  AudioRecorder.stopRecording() → [Float]
+        │
+        ▼
+  OverlayWindow.showProcessing()  ← yellow circle
+        │
+        ▼
+  WhisperWrapper.transcribe(audio: [Float])
+        │ background thread (DispatchQueue.global)
+        │ whisper_full() with language="auto"
+        │ Metal acceleration for encoder
+        │ returns String
+        ▼
+  TextInjector.type(text)
+        │ CGEvent keyboard simulation
+        │ inserts text at current cursor position
+        ▼
+  OverlayWindow.hide()
 ```
 
-- VAD segments audio in real-time during recording
-- Whisper runs only after key release — on all accumulated segments
-- Long speech (>20s) is auto-segmented by VAD; Whisper processes each segment and concatenates results
-- Expected latency between key release and text insertion: ~1-3 sec depending on duration and model
+**Audio format:** PCM Float32, 16kHz, mono — required by whisper.cpp.
 
-## UI/UX
+**Buffer size:** 16kHz × 4 bytes = 64KB/sec. 30 seconds of speech ≈ 2MB. Negligible.
 
-### Menu Bar
+**Transcription speed:** `base` model on M2 with Metal — ~0.5-1sec for 10 seconds of speech.
 
-- Icon: SF Symbol `mic.fill` — gray (idle), red (recording)
+**Text insertion:** CGEvent simulates keystrokes. Works in any application. Does not overwrite clipboard.
+
+**Hotkey:** Configurable via menubar UI. Default `Option+D`. Stored in UserDefaults. User records a new shortcut by clicking the shortcut field and pressing desired key combination.
+
+---
+
+## UI Components
+
+### Menubar
+
+- `NSStatusItem` with SF Symbol `mic.fill`
 - Click opens dropdown menu:
-  - Status: "Ready" / "Recording..." / "Recognizing..."
-  - Model: Whisper small / medium / large-v3 (selection, download if missing)
-  - Hotkey: displays current (Right Shift)
-  - Auto-start: on/off toggle
-  - Quit
+  - Status line: `Model: base | Ready`
+  - `Record Shortcut: ⌥D` — click to record new shortcut
+  - `Model →` submenu: tiny / base / small / medium (current marked with checkmark, click downloads if missing)
+  - `Quit`
 
-### Overlay (Floating Circle)
+### Overlay (Recording Indicator)
 
-- Position: horizontally centered, ~100pt from bottom edge
-- Size: ~60pt diameter
-- Appearance: semi-transparent circle with `.ultraThinMaterial` blur
-- Animation: scale pulses proportional to RMS voice amplitude (scale ~1.0–1.4)
-- Appear/disappear: fade in/out ~0.2s
-- Non-interactive: `.ignoresMouseEvents = true`
-- Window level: `NSWindow.Level.floating`
+- Small circular NSPanel (~48pt) in bottom-right corner, 20pt from screen edge
+- `level: .floating`, no shadow, no title bar
+- Red pulsing circle — recording in progress
+- Yellow — processing (transcription)
+- Disappears after text insertion
 
-### Permissions
+### First Launch (No Model)
 
-On first launch, requests:
-- **Microphone** — standard system dialog
-- **Accessibility** — required for global key intercept (CGEvent tap). App guides user to System Settings → Privacy → Accessibility
+- Model selection window:
+  - `tiny (75MB)` — fast, basic quality
+  - `base (142MB)` — balance of speed and quality *(recommended)*
+  - `small (466MB)` — high quality, slower
+- Download progress bar
+- Window closes after download, app is ready
 
-## Model Management
+---
 
-### Storage
+## whisper.cpp Integration
 
-- Models stored in `~/Library/Application Support/VoiceInput/Models/`
-- Each model in its own folder: `whisper-small/`, `whisper-medium/`, `whisper-large-v3/`
-- VAD model (`silero_vad.onnx`) downloaded on first launch, ~2MB
+### Build via SPM
 
-### Download
+- `CWhisper` target wraps whisper.cpp source files from `vendor/whisper.cpp/`
+- Compiler flags: `-DGGML_METAL`, `-O3`, `-DNDEBUG`
+- Metal shaders (`ggml-metal.metal`) included as resource
+- Swift imports via `import CWhisper`
 
-- First launch: auto-downloads Whisper small + Silero VAD
-- Other models downloadable from settings — progress bar in menu
-- Source: GitHub releases `k2-fsa/sherpa-onnx` (tar.bz2 archives)
-- Skip download if model already exists
+### WhisperWrapper API
 
-### Switching
+```swift
+class WhisperWrapper {
+    init(modelPath: String) throws    // whisper_init_from_file()
+    func transcribe(_ audio: [Float]) -> String  // whisper_full() → segments → joined text
+    deinit                            // whisper_free()
+}
+```
 
-- Select model in menu bar → applies immediately (recreates `OfflineRecognizer`)
-- Current model persisted in `UserDefaults`
+- Parameters: `language = "auto"`, `n_threads = 4`, `translate = false`
+- Model stays in memory while app is running (~150MB for base)
+- On model switch: `whisper_free()` → `whisper_init_from_file()`
 
-### Model Sizes
+### Models
 
-| Model | Size | Speed (5s audio, M1) |
-|-------|------|---------------------|
-| whisper-small | ~460MB | ~1-2s |
-| whisper-medium | ~1.5GB | ~2-4s |
-| whisper-large-v3 | ~3GB | ~4-6s |
+- Stored in `~/Library/Application Support/VoiceInput/models/`
+- Format: `ggml-base.bin`, `ggml-tiny.bin`, etc.
+- Downloaded from `huggingface.co/ggerganov/whisper.cpp` (official GGML models)
+- SHA256 verification after download
+- URLSession downloadTask with Progress tracking
 
-## Technical Details
+### Metal Acceleration
 
-### sherpa-onnx Integration
+- Enabled by `-DGGML_METAL` compiler flag
+- whisper.cpp automatically uses GPU for encoder when Metal is available
+- ~2-3x speedup over CPU-only on M2
 
-- Build XCFramework via `build-swift-macos.sh` from sherpa-onnx repo
-- Embed in Xcode project as embedded framework
-- Swift wrapper: adapt `SherpaOnnx.swift` from the repo
+---
 
-### Audio Pipeline
+## Distribution
 
-- `AVAudioEngine` → input node tap → convert to 16kHz mono float32
-- Buffer: 512 samples (~32ms) — fed to VAD and accumulated for Whisper
-- RMS computed per buffer for circle animation
+### GitHub Actions (`build.yml`)
 
-### Right Shift Detection
+```
+trigger: push tag v*.*.*
 
-- `CGEvent.tapCreate` with mask for `.flagsChanged`
-- Right Shift identified via `keyCode == 60`
-- Track flag appearance/disappearance to detect hold/release
+steps:
+  1. checkout with submodules (--recursive)
+  2. swift build -c release (macOS 14+, Xcode 15+)
+  3. Assemble .app bundle:
+     - binary → VoiceInput.app/Contents/MacOS/
+     - Info.plist → Contents/
+     - Metal shaders → Contents/Resources/
+  4. Ad-hoc sign (codesign --sign -)
+  5. Package as VoiceInput-v1.0.0-arm64.zip
+  6. Create GitHub Release, attach .zip
+```
 
-### Clipboard Flow
+### Build from Source
 
-1. Save `NSPasteboard.general` contents (all types)
-2. Write recognized text to pasteboard as string
-3. Simulate Cmd+V via `CGEvent`
-4. After ~100ms delay, restore original pasteboard contents
+```bash
+git clone --recursive https://github.com/<user>/VoiceInput.git
+cd VoiceInput
+swift build -c release
+```
 
-## Edge Cases
+### Constraints
 
-- **Empty speech**: VAD finds no speech segments → nothing inserted
-- **Microphone unavailable**: Show alert, menu bar icon gray with cross
-- **Accessibility not granted**: Cannot intercept keys, show instruction dialog
-- **Model not downloaded**: On record attempt, show "Download model in settings"
-- **Long speech (>60s)**: VAD segments, Whisper processes sequentially, concatenates results
+- Apple Silicon only (arm64). No Intel support.
+- No Apple notarization (requires $99/yr Developer Account). User right-clicks → Open on first launch, or runs `xattr -d com.apple.quarantine`. README explains this with screenshot.
+
+### Future (not v1)
+
+- Homebrew Cask formula
+- Notarization if Developer Account obtained
+- Universal binary (arm64 + x86_64)
+
+---
+
+## Permissions
+
+| Permission | Mechanism | If Denied |
+|------------|-----------|-----------|
+| Microphone | `NSMicrophoneUsageDescription` in Info.plist | Menubar icon changes to `mic.slash`, tooltip with instructions |
+| Accessibility | Manual: System Settings → Privacy & Security → Accessibility | Notification with "Open Settings" button on record attempt |
+
+---
+
+## Error Handling
+
+| Situation | Behavior |
+|-----------|----------|
+| No model downloaded | First launch model selection window |
+| Download error | Retry button + error message |
+| Microphone denied | Icon changes to `mic.slash`, tooltip with instructions |
+| Accessibility missing | Notification with "Open Settings" button |
+| Empty transcription | Silently skip, overlay disappears |
+
+---
+
+## System Requirements
+
+- macOS 14+ (Sonoma)
+- Apple Silicon (M1/M2/M3)
+- ~200MB free space (app + base model)
+
+---
+
+## Testing
+
+- **Unit tests:** `WhisperWrapper` (transcribe test .wav file), `ModelManager` (path validation, SHA256)
+- **Manual tests:** push-to-talk cycle, model switching, first launch flow, hotkey customization
