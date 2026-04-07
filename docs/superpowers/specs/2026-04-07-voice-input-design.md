@@ -11,41 +11,39 @@ Lightweight open-source push-to-talk voice input app for macOS Apple Silicon. Tr
 
 ### Approach
 
-whisper.cpp as a git submodule, compiled together with the app via SPM C-target. Swift calls whisper.cpp through a C bridging header. Single binary, no external runtime dependencies.
+whisper.cpp v1.7.2 as a git submodule with its own Package.swift (includes Metal+Accelerate support). Referenced as a local SPM package dependency — no custom C bridging target needed. Swift imports `whisper` directly.
 
 ### Project Structure
 
 ```
 VoiceInput/
-├── Package.swift              # SPM manifest, C-target for whisper.cpp
-├── Sources/
-│   ├── VoiceInput/            # main Swift app code
-│   │   ├── App.swift          # @main, NSApplication, menubar setup
-│   │   ├── AudioRecorder.swift    # AVAudioEngine, microphone capture
-│   │   ├── WhisperWrapper.swift   # Swift wrapper over whisper.cpp C API
-│   │   ├── HotkeyManager.swift    # global hotkey (CGEvent tap)
-│   │   ├── TextInjector.swift     # text insertion at cursor (CGEvent)
-│   │   ├── ModelManager.swift     # model download/storage
-│   │   ├── OverlayWindow.swift    # floating recording indicator
-│   │   └── MenuBarController.swift # NSStatusItem, settings menu
-│   └── CWhisper/             # C-target, bridging for whisper.cpp
-│       ├── include/
-│       │   └── whisper_bridge.h
-│       └── whisper_bridge.c
+├── Package.swift                  # SPM manifest, depends on vendor/whisper.cpp
+├── Sources/VoiceInput/
+│   ├── main.swift                 # Entry point, AppDelegate, orchestration
+│   ├── AudioRecorder.swift        # AVAudioEngine, microphone capture
+│   ├── WhisperWrapper.swift       # Swift actor wrapping whisper.cpp C API
+│   ├── HotkeyManager.swift        # global hotkey (CGEvent tap)
+│   ├── TextInjector.swift         # clipboard-based text insertion
+│   ├── ModelManager.swift         # model download/storage
+│   ├── OverlayWindow.swift        # floating recording indicator
+│   ├── MenuBarController.swift    # NSStatusItem, settings menu
+│   └── FirstLaunchWindow.swift    # model selection on first run
 ├── vendor/
-│   └── whisper.cpp/           # git submodule
+│   └── whisper.cpp/               # git submodule pinned to v1.7.2
 ├── Resources/
 │   └── Info.plist
+├── scripts/
+│   └── bundle.sh                  # .app bundle assembly
 └── .github/
     └── workflows/
-        └── build.yml          # CI: build + Release
+        └── build.yml              # CI: build + Release
 ```
 
 ### Module Responsibilities
 
 | Module | Responsibility |
 |--------|---------------|
-| `App.swift` | App lifecycle, NSApplication setup, menubar initialization |
+| `main.swift` | App lifecycle, NSApplication setup, push-to-talk orchestration |
 | `AudioRecorder.swift` | AVAudioEngine capture, PCM Float32 16kHz mono buffer |
 | `WhisperWrapper.swift` | Load model, call whisper_full(), return transcribed text |
 | `HotkeyManager.swift` | CGEvent tap for global configurable hotkey |
@@ -53,7 +51,7 @@ VoiceInput/
 | `ModelManager.swift` | Download models from HuggingFace, SHA256 verify, storage |
 | `OverlayWindow.swift` | Floating NSPanel indicator (recording/processing states) |
 | `MenuBarController.swift` | NSStatusItem, dropdown menu, settings |
-| `CWhisper` | C bridging layer for whisper.cpp |
+| `FirstLaunchWindow.swift` | Model selection window on first run |
 
 ---
 
@@ -142,10 +140,10 @@ User releases hotkey
 
 ### Build via SPM
 
-- `CWhisper` target wraps whisper.cpp source files from `vendor/whisper.cpp/`
-- Compiler flags: `-DGGML_METAL`, `-O3`, `-DNDEBUG`
-- Metal shaders (`ggml-metal.metal`) included as resource
-- Swift imports via `import CWhisper`
+- whisper.cpp v1.7.2 referenced as local package dependency: `.package(path: "vendor/whisper.cpp")`
+- Its own Package.swift compiles all C sources with `-DGGML_USE_METAL`, `-O3`, Accelerate framework
+- Metal shaders (`ggml-metal.metal`) included as SPM resource
+- Swift imports via `import whisper`
 
 ### WhisperWrapper API
 
