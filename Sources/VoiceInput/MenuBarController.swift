@@ -70,6 +70,17 @@ class MenuBarController: NSObject {
 
         menu.addItem(NSMenuItem.separator())
 
+        // Reset Permissions
+        let resetItem = NSMenuItem(
+            title: "Reset Accessibility...",
+            action: #selector(resetAccessibility),
+            keyEquivalent: ""
+        )
+        resetItem.target = self
+        menu.addItem(resetItem)
+
+        menu.addItem(NSMenuItem.separator())
+
         // Quit
         menu.addItem(NSMenuItem(
             title: "Quit",
@@ -204,6 +215,25 @@ class MenuBarController: NSObject {
     @objc private func selectModel(_ sender: NSMenuItem) {
         guard let size = sender.representedObject as? ModelSize else { return }
         delegate?.menuBarDidSelectModel(size)
+    }
+
+    @objc private func resetAccessibility() {
+        // Reset TCC accessibility permission for this app
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+        process.arguments = ["reset", "Accessibility", "com.voiceinput.app"]
+        try? process.run()
+        process.waitUntilExit()
+
+        let alert = NSAlert()
+        alert.messageText = "Accessibility Reset"
+        alert.informativeText = "Please quit VoiceInput, reopen it, and grant Accessibility permission again."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Quit Now")
+        alert.addButton(withTitle: "Later")
+        if alert.runModal() == .alertFirstButtonReturn {
+            NSApplication.shared.terminate(nil)
+        }
     }
 
     @objc private func quit() {
