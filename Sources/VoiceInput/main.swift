@@ -11,6 +11,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, MenuBarDelegate {
     private var whisperContext: WhisperContext?
 
     private var isRecording = false
+    private var accessibilityTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         menuBar = MenuBarController()
@@ -87,8 +88,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, MenuBarDelegate {
     // MARK: - Hotkey
 
     private func startHotkeyListener() {
-        guard HotkeyManager.checkAccessibility(prompt: true) else {
-            print("Accessibility permission required")
+        // Stop any existing retry timer
+        accessibilityTimer?.invalidate()
+        accessibilityTimer = nil
+
+        if !HotkeyManager.checkAccessibility(prompt: true) {
+            print("Accessibility permission required — waiting for user to grant it...")
+            // Poll every 2 seconds until permission is granted
+            accessibilityTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) {
+                [weak self] timer in
+                if HotkeyManager.checkAccessibility(prompt: false) {
+                    timer.invalidate()
+                    self?.accessibilityTimer = nil
+                    print("Accessibility permission granted!")
+                    self?.startHotkeyListener()
+                }
+            }
             return
         }
 
