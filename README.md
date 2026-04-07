@@ -9,14 +9,14 @@ Lightweight push-to-talk voice input for macOS. Hold a hotkey, speak in English 
 
 ## Install
 
-1. Download `VoiceInput-vX.X.X-arm64.zip` from [Releases](../../releases)
-2. Unzip and move `VoiceInput.app` to Applications
-3. Right-click → Open (first launch only, to bypass Gatekeeper)
-
-Or remove the quarantine flag:
-```bash
-xattr -d com.apple.quarantine /Applications/VoiceInput.app
-```
+1. Download **`VoiceInput-vX.X.X-arm64.dmg`** from [Releases](../../releases)
+2. Open the DMG and drag **VoiceInput** to **Applications**
+3. Open Terminal and run:
+   ```bash
+   xattr -cr /Applications/VoiceInput.app
+   ```
+   This is required because the app is not notarized by Apple (no $99/yr Developer Account). The command removes the quarantine flag so macOS allows it to run.
+4. Open **VoiceInput** from Applications
 
 ## First Launch
 

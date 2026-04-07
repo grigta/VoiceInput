@@ -20,7 +20,12 @@ jobs:
           chmod +x scripts/bundle.sh
           ./scripts/bundle.sh
 
-      - name: Package
+      - name: Create DMG
+        run: |
+          chmod +x scripts/create-dmg.sh
+          ./scripts/create-dmg.sh "VoiceInput-${{ github.ref_name }}-arm64.dmg"
+
+      - name: Package ZIP
         run: |
           cd .build/release
           zip -r "VoiceInput-${{ github.ref_name }}-arm64.zip" VoiceInput.app
@@ -28,5 +33,18 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: .build/release/VoiceInput-*.zip
-          generate_release_notes: true
+          files: |
+            .build/release/VoiceInput-*.dmg
+            .build/release/VoiceInput-*.zip
+          body: |
+            ## Install
+
+            1. Download **VoiceInput-${{ github.ref_name }}-arm64.dmg**
+            2. Open the DMG and drag VoiceInput to Applications
+            3. **Important:** Run this command before first launch:
+               ```
+               xattr -cr /Applications/VoiceInput.app
+               ```
+            4. Open VoiceInput from Applications
+
+            Requires macOS 14+ (Sonoma) and Apple Silicon (M1/M2/M3/M4).

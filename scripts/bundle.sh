@@ -25,8 +25,8 @@ find "${BUILD_DIR}" -name "*.bundle" -maxdepth 2 | while read -r bundle; do
     cp -R "${bundle}" "${BUNDLE_DIR}/Contents/Resources/"
 done
 
-# Ad-hoc code sign
-codesign --force --sign - "${BUNDLE_DIR}"
+# Ad-hoc code sign (--deep signs nested frameworks/bundles too)
+codesign --force --deep --sign - "${BUNDLE_DIR}"
 
 echo ""
 echo "Built successfully: ${BUNDLE_DIR}"
